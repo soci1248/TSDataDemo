@@ -71,7 +71,7 @@ public class TradeStationWebApi
         }
     }
 
-    private AccessToken TryReadCachedToken()
+    private static AccessToken TryReadCachedToken()
     {
         string setting = new SettingsStore().GetSetting();
         if (!string.IsNullOrEmpty(setting))
@@ -88,7 +88,7 @@ public class TradeStationWebApi
         return null;
     }
 
-    private void SaveToken(AccessToken token)
+    private static void SaveToken(AccessToken token)
     {
         new SettingsStore().SaveSetting(JsonConvert.SerializeObject(token));
     }
@@ -164,14 +164,14 @@ public class TradeStationWebApi
     {
         using var client = new HttpClient();
         var url = $"{HostV2}/security/authorize";
-        var content = new FormUrlEncodedContent(new[]
-        {
+        var content = new FormUrlEncodedContent(
+        [
             KeyValuePair.Create("grant_type", "refresh_token"),
             KeyValuePair.Create("client_id", Key),
             KeyValuePair.Create("client_secret", Secret),
             KeyValuePair.Create("refresh_token", Token.refresh_token),
-            KeyValuePair.Create("response_type", "token"),
-        });
+            KeyValuePair.Create("response_type", "token")
+        ]);
 
         try
         {

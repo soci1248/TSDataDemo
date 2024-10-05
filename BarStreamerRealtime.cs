@@ -77,6 +77,13 @@ public sealed class BarStreamerRealtime(string host, AccessToken token)
 
                         Log(_line);
 
+                        if (StartsWith("ERROR"))
+                        {
+                            Log("Some error happened, reconnecting...");
+
+                            break;
+                        }
+
                         if (StartsWith("{\"Heartbeat\":"))
                         {
                         }
@@ -160,7 +167,7 @@ public sealed class BarStreamerRealtime(string host, AccessToken token)
         Log($"Streaming Bars for {_ticker.TickerTS}");
         Log($"Request url: {_resourceUri}");
 
-        HttpClient client = new HttpClient
+        HttpClient client = new()
         {
             Timeout = NetworkTimeoutTimeSpan,
             DefaultRequestHeaders = { Authorization = new AuthenticationHeaderValue("Bearer", token.access_token) }
