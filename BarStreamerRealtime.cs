@@ -68,7 +68,11 @@ public sealed class BarStreamerRealtime(string host, AccessToken token)
                     while (!cancellationToken.IsCancellationRequested)
                     {
                         _line = await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-                        if (_line == null) break;
+                        if (_line == null)
+                        {
+                            Log("Null returned from reading network data, probably the streaming ended. Reconnecting...");
+                            break;
+                        }
                         _timeoutCounter = 0;
 
                         Log(_line);
