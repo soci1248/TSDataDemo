@@ -8,7 +8,7 @@ namespace TSDataDemo;
 /// <summary>
 /// Starts streaming market data from TradeStation and raises BarArrived events till stopped
 /// </summary>
-public sealed class BarStreamerRealtime(string host, AccessToken token)
+public sealed class BarStreamerRealtime(string host)
 {
     /// <summary>
     /// If no heartbeat arrives within this interval we reconnect
@@ -144,7 +144,7 @@ public sealed class BarStreamerRealtime(string host, AccessToken token)
 
     private void Log(string message)
     {
-        var f = $"{DateTime.Now} {_ticker.TickerTS} {message}";
+        var f = $"{DateTime.Now} {StreamerName} {message}";
         
         Console.WriteLine(f);
         _writer.WriteLine(f);
@@ -165,12 +165,12 @@ public sealed class BarStreamerRealtime(string host, AccessToken token)
                                $"&barsback=1");
 
         Log($"Streaming Bars for {_ticker.TickerTS}");
-        Log($"Request url: {_resourceUri}");
+        Log($"Request url: {_resourceUri} with token: {AccessToken.Instance.access_token}");
 
         HttpClient client = new()
         {
             Timeout = NetworkTimeoutTimeSpan,
-            DefaultRequestHeaders = { Authorization = new AuthenticationHeaderValue("Bearer", token.access_token) }
+            DefaultRequestHeaders = { Authorization = new AuthenticationHeaderValue("Bearer", AccessToken.Instance.access_token) }
         };
         Task<Stream> stream = client.GetStreamAsync(_resourceUri);
 

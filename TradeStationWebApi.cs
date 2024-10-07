@@ -17,11 +17,11 @@ public class TradeStationWebApi
     private string HostV3 { get; set; }
 
     private string RedirectUri { get; }
-    private readonly TimeSpan _refreshTokenPeriod = TimeSpan.FromMinutes(10);
-    private readonly TimeSpan _refreshTokenPeriodForFailedAttempt = TimeSpan.FromMinutes(2);
+    private readonly TimeSpan _refreshTokenPeriod = TimeSpan.FromMinutes(1);
+    private readonly TimeSpan _refreshTokenPeriodForFailedAttempt = TimeSpan.FromMinutes(1);
     private readonly object _forLock = new();
 
-    private AccessToken Token { get; }
+    private readonly StreamWriter _writer;
 
     public TradeStationWebApi([NotNull] string key, [NotNull] string secret, [NotNull] string redirectUri, TradeStationEnvironment environment)
     {
@@ -30,6 +30,9 @@ public class TradeStationWebApi
         RedirectUri = redirectUri ?? throw new ArgumentNullException(nameof(redirectUri));
 
         ServicePointManager.DefaultConnectionLimit = 1000;
+
+        _writer = File.AppendText("LogApi.txt");
+        _writer.AutoFlush = true;
 
         // ReSharper disable once AsyncVoidLambda
         _timer = new Timer(async _ =>
@@ -53,20 +56,28 @@ public class TradeStationWebApi
                 throw new ArgumentOutOfRangeException(nameof(environment), environment, null);
         }
 
-        Token = TryReadCachedToken();
+        Log("Reading cached token");
+        var token = TryReadCachedToken();
 
-        if (Token == null)
+        if (token == null)
         {
-            Token = AsyncContext.Run(() => GetAccessToken(GetAuthorizationCode()));
-            SaveToken(Token);
+            Log("No cached token found, getting a new one from TS");
+            token = AsyncContext.Run(() => GetAccessToken(GetAuthorizationCode()));
+            SaveToken(token);
+
+            Log("Updating local token");
+            AccessToken.UpdateFrom(token);
         }
         else
         {
+            Log("Refreshing token");
             bool success = AsyncContext.Run(RefreshAccessToken);
             if (!success)
             {
-                Token = AsyncContext.Run(() => GetAccessToken(GetAuthorizationCode()));
-                SaveToken(Token);
+                token = AsyncContext.Run(() => GetAccessToken(GetAuthorizationCode()));
+                SaveToken(token);
+                Log("Updating local token");
+                AccessToken.UpdateFrom(token);
             }
         }
     }
@@ -79,8 +90,8 @@ public class TradeStationWebApi
             var token = JsonConvert.DeserializeObject<AccessToken>(setting);
             if (token != null)
             {
-                token.access_token = null;
-                token.expires_in = null;
+                //token.access_token = null;
+                //token.expires_in = null;
                 return token;
             }
         }
@@ -128,13 +139,12 @@ public class TradeStationWebApi
         using var httpClient = new HttpClient();
         var content = new StringContent(postData, Encoding.UTF8, "application/x-www-form-urlencoded");
         var response = await httpClient.PostAsync($"{Host}/security/authorize", content).ConfigureAwait(false);
-
         // Handle response
         if (response.IsSuccessStatusCode)
         {
             // Read and process response
             string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            Console.WriteLine(responseBody);
+            Log(responseBody);
 
             try
             {
@@ -142,14 +152,14 @@ public class TradeStationWebApi
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                Log(ex.Message);
                 Console.ReadLine();
                 Environment.Exit(-1);
                 throw;
             }
         }
 
-        Console.WriteLine($"Failed to make request. Status code: {response.StatusCode}");
+        Log($"Failed to make request. Status code: {response.StatusCode}");
 
         return null;
     }
@@ -160,8 +170,11 @@ public class TradeStationWebApi
         return JsonConvert.DeserializeObject<T>(scrubbedJson);
     }
 
+    private int _tokenAccessCounter;
+
     private async Task<bool> RefreshAccessToken()
     {
+        Log($"RefreshAccessToken called");
         using var client = new HttpClient();
         var url = $"{HostV2}/security/authorize";
         var content = new FormUrlEncodedContent(
@@ -169,20 +182,26 @@ public class TradeStationWebApi
             KeyValuePair.Create("grant_type", "refresh_token"),
             KeyValuePair.Create("client_id", Key),
             KeyValuePair.Create("client_secret", Secret),
-            KeyValuePair.Create("refresh_token", Token.refresh_token),
+            KeyValuePair.Create("refresh_token", AccessToken.Instance.refresh_token),
             KeyValuePair.Create("response_type", "token")
         ]);
 
         try
         {
+            _tokenAccessCounter++;
+            Log($"Getting refresh token ({_tokenAccessCounter}): {url}");
             var response = await client.PostAsync(url, content).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
+            Log($"Refresh token successfully got from TS ({_tokenAccessCounter})");
             string responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            Log($"Response: {responseContent}");
             var newToken = GetDeserializedResponse<AccessToken>(responseContent);
             lock (_forLock)
             {
-                Token.access_token = newToken.access_token;
-                Token.expires_in = newToken.expires_in;
+                Log("Updating local token");
+                AccessToken.Instance.access_token = newToken.access_token;
+                AccessToken.Instance.expires_in = newToken.expires_in;
+
             }
 
             _timer.Change(_refreshTokenPeriod, Timeout.InfiniteTimeSpan);
@@ -190,7 +209,7 @@ public class TradeStationWebApi
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex.Message);
+            Log(ex.Message);
             _timer.Change(_refreshTokenPeriodForFailedAttempt, Timeout.InfiniteTimeSpan);
             return false;
         }
@@ -198,6 +217,15 @@ public class TradeStationWebApi
 
     public BarStreamerRealtime CreateBarStreamerRealtime()
     {
-        return new BarStreamerRealtime(HostV3, Token);
+        return new BarStreamerRealtime(HostV3);
     }
+
+    private void Log(string message)
+    {
+        var f = $"{DateTime.Now} {message}";
+
+        Console.WriteLine(f);
+        _writer.WriteLine(f);
+    }
+
 }
