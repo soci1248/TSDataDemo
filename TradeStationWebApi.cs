@@ -17,11 +17,11 @@ public class TradeStationWebApi
     private string HostV3 { get; set; }
 
     private string RedirectUri { get; }
-    private readonly TimeSpan _refreshTokenPeriod = TimeSpan.FromMinutes(10);
-    private readonly TimeSpan _refreshTokenPeriodForFailedAttempt = TimeSpan.FromMinutes(2);
+    private readonly TimeSpan _refreshTokenPeriod = TimeSpan.FromMinutes(1);
+    private readonly TimeSpan _refreshTokenPeriodForFailedAttempt = TimeSpan.FromMinutes(1);
     private readonly object _forLock = new();
 
-    private StreamWriter _writer;
+    private readonly StreamWriter _writer;
 
     public TradeStationWebApi([NotNull] string key, [NotNull] string secret, [NotNull] string redirectUri, TradeStationEnvironment environment)
     {
@@ -90,8 +90,8 @@ public class TradeStationWebApi
             var token = JsonConvert.DeserializeObject<AccessToken>(setting);
             if (token != null)
             {
-                token.access_token = null;
-                token.expires_in = null;
+                //token.access_token = null;
+                //token.expires_in = null;
                 return token;
             }
         }
@@ -106,7 +106,7 @@ public class TradeStationWebApi
 
     private string GetAuthorizationCode()
     {
-        var uri = $"https://signin.tradestation.com/authorize?response_type=code&client_id={Key}&redirect_uri={RedirectUri}&audience=https://api.tradestation.com&scope=MarketData&state=Valami";
+        var uri = $"{HostV2}/authorize?client_id={Key}&response_type=code&redirect_uri={RedirectUri}";
         Process.Start(new ProcessStartInfo(uri)
         {
             UseShellExecute = true,
@@ -138,8 +138,7 @@ public class TradeStationWebApi
 
         using var httpClient = new HttpClient();
         var content = new StringContent(postData, Encoding.UTF8, "application/x-www-form-urlencoded");
-        var response = await httpClient.PostAsync($"https://signin.tradestation.com/oauth/token", content).ConfigureAwait(false);
-
+        var response = await httpClient.PostAsync($"{Host}/security/authorize", content).ConfigureAwait(false);
         // Handle response
         if (response.IsSuccessStatusCode)
         {
@@ -171,30 +170,38 @@ public class TradeStationWebApi
         return JsonConvert.DeserializeObject<T>(scrubbedJson);
     }
 
+    private int _tokenAccessCounter;
+
     private async Task<bool> RefreshAccessToken()
     {
+        Log($"RefreshAccessToken called");
         using var client = new HttpClient();
-        var url = $"https://signin.tradestation.com/oauth/token";
+        var url = $"{HostV2}/security/authorize";
         var content = new FormUrlEncodedContent(
         [
             KeyValuePair.Create("grant_type", "refresh_token"),
             KeyValuePair.Create("client_id", Key),
             KeyValuePair.Create("client_secret", Secret),
             KeyValuePair.Create("refresh_token", AccessToken.Instance.refresh_token),
+            KeyValuePair.Create("response_type", "token")
         ]);
 
         try
         {
-            Log($"Getting refresh token: {url}");
+            _tokenAccessCounter++;
+            Log($"Getting refresh token ({_tokenAccessCounter}): {url}");
             var response = await client.PostAsync(url, content).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
+            Log($"Refresh token successfully got from TS ({_tokenAccessCounter})");
             string responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            Log(responseContent);
+            Log($"Response: {responseContent}");
             var newToken = GetDeserializedResponse<AccessToken>(responseContent);
             lock (_forLock)
             {
                 Log("Updating local token");
-                AccessToken.UpdateFrom(newToken);
+                AccessToken.Instance.access_token = newToken.access_token;
+                AccessToken.Instance.expires_in = newToken.expires_in;
+
             }
 
             _timer.Change(_refreshTokenPeriod, Timeout.InfiniteTimeSpan);
