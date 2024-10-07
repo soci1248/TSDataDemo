@@ -80,6 +80,7 @@ public class TradeStationWebApi
                 AccessToken.UpdateFrom(token);
             }
         }
+        _timer.Change(_refreshTokenPeriod, Timeout.InfiniteTimeSpan);
     }
 
     private static AccessToken TryReadCachedToken()
@@ -201,7 +202,6 @@ public class TradeStationWebApi
                 Log("Updating local token");
                 AccessToken.Instance.access_token = newToken.access_token;
                 AccessToken.Instance.expires_in = newToken.expires_in;
-
             }
 
             _timer.Change(_refreshTokenPeriod, Timeout.InfiniteTimeSpan);
